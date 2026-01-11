@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"time"
 )
 
@@ -16,33 +17,61 @@ var (
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetFlags(0)
 
-	flag.DurationVar(&timeout, "timeout", -1, "Maximum runtime for the command (e.g. 10s, 1m). -1 means no timeout")
-	flag.DurationVar(&graceful, "graceful", -1, "Grace period before force kill after timeout")
+	flag.DurationVar(&timeout, "timeout", -1, "Maximum runtime (e.g. 10s, 1m). -1 means no timeout.")
+	flag.DurationVar(&graceful, "graceful", 5*time.Second, "Grace period before force kill.")
 	flag.Usage = usage
 	flag.Parse()
 
-	args := flag.Args()
-	if len(args) == 0 {
+	if flag.NArg() == 0 {
 		log.Println("pguard: no command specified")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	cmdName := args[0]
-	cmdArgs := args[1:]
-
 	ctx, cancel := makeContext(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
+	cmd := exec.CommandContext(ctx, flag.Arg(0), flag.Args()[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		log.Fatalln("pguard:", err)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-doneCh:
+		exit(err)
+
+	case <-sigCh:
+		log.Println("pguard: interrupt received")
+
+	case <-ctx.Done():
+		log.Println("pguard: timeout reached")
+	}
+
+	_ = cmd.Process.Signal(os.Interrupt)
+
+	select {
+	case err := <-doneCh:
+		exit(err)
+
+	case <-time.After(graceful):
+		log.Println("pguard: force killing process")
+		doneCh <- cmd.Process.Kill()
+		exit(<-doneCh)
 	}
 }
 
@@ -53,11 +82,18 @@ func makeContext(ctx context.Context, timeout time.Duration) (context.Context, c
 	return context.WithCancel(ctx)
 }
 
+func exit(err error) {
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `pguard - process guard with timeout
 
 Usage:
-  pguard [flags] <command> [command args...]
+  pguard [flags] <command> [args...]
 
 Flags:
 `)
