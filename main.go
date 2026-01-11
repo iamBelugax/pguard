@@ -1,21 +1,33 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/exec"
+	"time"
 )
 
 func main() {
+	log.SetFlags(0)
+
 	if len(os.Args) < 2 {
 		log.Fatalln("pguard: invalid args")
 	}
 
-	_ = os.Args[1]
+	timeout := os.Args[1]
 	cmdName := os.Args[2]
 	cmdArgs := os.Args[3:]
 
-	cmd := exec.Command(cmdName, cmdArgs...)
+	duration, err := time.ParseDuration(timeout)
+	if err != nil {
+		log.Fatalln("pguard:", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
