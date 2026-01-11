@@ -49,6 +49,7 @@ func main() {
 	doneCh := make(chan error, 1)
 	go func() {
 		doneCh <- cmd.Wait()
+		close(doneCh)
 	}()
 
 	select {
@@ -70,7 +71,7 @@ func main() {
 
 	case <-time.After(graceful):
 		log.Println("pguard: force killing process")
-		doneCh <- cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		exit(<-doneCh)
 	}
 }
