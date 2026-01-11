@@ -12,7 +12,7 @@ func main() {
 	log.SetFlags(0)
 
 	if len(os.Args) < 2 {
-		log.Fatalln("pguard: invalid args")
+		log.Fatalln("pguard: invalid args <duration> <command> <command args>")
 	}
 
 	timeout := os.Args[1]
@@ -28,6 +28,7 @@ func main() {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
